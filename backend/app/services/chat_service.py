@@ -8,29 +8,20 @@ from google import genai
 from google.genai import types
 from ddgs import DDGS
 
+from qdrant_client.models import Filter, FieldCondition, MatchValue
+
 from app.db import get_database
 from app.config import (
     SIMILARITY_THRESHOLD,
     TOP_K_RESULTS,
     MAX_CHAT_HISTORY,
-    MAX_WEB_RESULTS,
-    CHROMA_DISTANCE_SPACE
+    MAX_WEB_RESULTS
 )
 from app.services.embedding_service import EmbeddingService
 
 def normalize_text(text: str) -> str:
     """Removes special characters and spaces, converts to lowercase for offset alignment."""
     return re.sub(r'[^a-z0-9]', '', text.lower())
-
-def normalize_distance_to_similarity(distance: float, space: str) -> float:
-    """Normalizes raw distances from ChromaDB into similarity score bounds [0.0, 1.0]."""
-    if space == "cosine" or space == "ip":
-        score = 1.0 - distance
-    elif space == "l2":
-        score = 1.0 - (distance / 2.0)
-    else:
-        score = 1.0 - distance
-    return max(0.0, min(1.0, score))
 
 def get_chunk_timestamps(chunk_text: str, segments: list, total_duration: float, chunk_index: int, total_chunks: int):
     """
@@ -121,37 +112,52 @@ def get_chunk_timestamps(chunk_text: str, segments: list, total_duration: float,
 def generate_query_embedding(question: str) -> List[float]:
     """Generates query embedding list using BAAI/bge-small-en-v1.5 model."""
     model = EmbeddingService.get_model()
-    # Direct encode converts to numpy vector, list conversion maps back to list of floats
     embedding = model.encode(question, convert_to_numpy=True).tolist()
     return embedding
 
 def retrieve_relevant_chunks(media_id: str, owner_id: str, question: str) -> List[Dict[str, Any]]:
     """
-    Retrieves the top-K relevant transcript chunks from ChromaDB.
-    Verify that:
-    - The user's question is embedded using BAAI/bge-small-en-v1.5.
-    - Searches the 'media_embeddings' collection.
-    - Filters by media_id and owner_id (if stored).
-    - Returns the Top-K most relevant chunks with metadata, score, and timestamps.
+    Retrieves the top-K relevant transcript chunks from Qdrant Cloud.
+    - Embeds the user's question using BAAI/bge-small-en-v1.5.
+    - Queries Qdrant collection filtered by media_id and owner_id.
+    - Returns the Top-K most relevant chunks with metadata, similarity score, and timestamps.
     """
     db = get_database()
-    collection = EmbeddingService.get_chroma_collection()
+    qdrant = EmbeddingService.get_qdrant_client()
+    EmbeddingService.ensure_collection(qdrant)
+    collection_name = os.getenv("QDRANT_COLLECTION_NAME") or EmbeddingService.COLLECTION_NAME
+
     query_embedding = generate_query_embedding(question)
 
-    # Search ChromaDB collection
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=TOP_K_RESULTS,
-        where={"$and": [{"media_id": media_id}, {"owner_id": owner_id}]}
-    )
+    # Count total chunks for this media_id for timestamp fallback calculations
+    try:
+        count_res = qdrant.count(
+            collection_name=collection_name,
+            count_filter=Filter(
+                must=[FieldCondition(key="media_id", match=MatchValue(value=media_id))]
+            )
+        )
+        total_chunks = count_res.count
+    except Exception:
+        total_chunks = 1
 
-    ids = results.get("ids", [[]])[0]
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
-    distances = results.get("distances", [[]])[0]
-
-    all_chunks = collection.get(where={"media_id": media_id}, include=[])
-    total_chunks = len(all_chunks.get("ids", []))
+    # Execute vector search on Qdrant Cloud
+    try:
+        search_points = qdrant.query_points(
+            collection_name=collection_name,
+            query=query_embedding,
+            query_filter=Filter(
+                must=[
+                    FieldCondition(key="media_id", match=MatchValue(value=media_id)),
+                    FieldCondition(key="owner_id", match=MatchValue(value=owner_id))
+                ]
+            ),
+            limit=TOP_K_RESULTS,
+            with_payload=True
+        ).points
+    except Exception as e:
+        print(f"[Qdrant Search Error]: {e}")
+        search_points = []
 
     transcript_doc = db.transcripts.find_one({"media_id": media_id})
     segments = []
@@ -161,20 +167,20 @@ def retrieve_relevant_chunks(media_id: str, owner_id: str, question: str) -> Lis
         duration = transcript_doc.get("duration") or transcript_doc.get("duration_seconds") or 0.0
 
     retrieved_sources = []
-    for idx in range(len(ids)):
-        chunk_id = ids[idx]
-        text_content = documents[idx]
-        meta = metadatas[idx]
-        distance = distances[idx]
-
-        score = normalize_distance_to_similarity(distance, CHROMA_DISTANCE_SPACE)
-        chunk_idx = meta.get("chunk_index", 0)
+    for point in search_points:
+        payload = point.payload or {}
+        text_content = payload.get("document", "")
+        chunk_idx = payload.get("chunk_index", 0)
+        
+        # In Qdrant Cosine distance, point.score is the cosine similarity score
+        score = float(point.score) if point.score is not None else 0.0
+        score = max(0.0, min(1.0, score))
 
         start_time, end_time = get_chunk_timestamps(text_content, segments, duration, chunk_idx, total_chunks)
 
         retrieved_sources.append({
             "type": "transcript",
-            "chunk_id": chunk_id,
+            "chunk_id": str(point.id),
             "start": start_time,
             "end": end_time,
             "score": round(score, 4),
@@ -321,7 +327,7 @@ async def ask_question(media_id: str, owner_id: str, question: str, conversation
     # 2. Load previous messages from MongoDB
     prev_messages = list(db.chat_messages.find({"conversation_id": conversation_id}).sort("created_at", 1))
 
-    # 3. Search ChromaDB and retrieve relevant chunks
+    # 3. Search Qdrant Cloud and retrieve relevant chunks
     transcript_sources = retrieve_relevant_chunks(media_id, owner_id, question)
 
     # Step 2: Temporarily log retrieved chunks information

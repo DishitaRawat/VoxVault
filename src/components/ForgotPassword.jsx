@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function ForgotPassword({ onNavigate }) {
   const [email, setEmail] = useState('');
@@ -25,7 +26,7 @@ export default function ForgotPassword({ onNavigate }) {
     setLoading(true);
     setErrorMsg('');
     try {
-      const res = await fetch('http://localhost:8000/auth/reset-password', {
+      const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),

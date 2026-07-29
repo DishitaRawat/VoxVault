@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function IngestionModal({ show, onClose, onIngestSuccess }) {
   const [activeTab, setActiveTab] = useState('upload'); // 'upload', 'link', 'podcast'
@@ -54,7 +55,7 @@ export default function IngestionModal({ show, onClose, onIngestSuccess }) {
       formData.append('file', selectedFile);
 
       try {
-        const res = await fetch('http://localhost:8000/upload', {
+        const res = await fetch(`${API_BASE_URL}/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
           body: formData
@@ -79,7 +80,7 @@ export default function IngestionModal({ show, onClose, onIngestSuccess }) {
       formData.append('url', inputUrl.trim());
 
       try {
-        const res = await fetch('http://localhost:8000/upload', {
+        const res = await fetch(`${API_BASE_URL}/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
           body: formData
@@ -102,7 +103,7 @@ export default function IngestionModal({ show, onClose, onIngestSuccess }) {
       setEpisodes([]);
 
       try {
-        const res = await fetch('http://localhost:8000/podcast', {
+        const res = await fetch(`${API_BASE_URL}/podcast`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -134,7 +135,7 @@ export default function IngestionModal({ show, onClose, onIngestSuccess }) {
     }
  
     try {
-      const res = await fetch('http://localhost:8000/upload', {
+      const res = await fetch(`${API_BASE_URL}/upload`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData

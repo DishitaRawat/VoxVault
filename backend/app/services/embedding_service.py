@@ -2,19 +2,22 @@ import os
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 import numpy as np
-import chromadb
 from sentence_transformers import SentenceTransformer
 
-from pathlib import Path
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct, Filter, FieldCondition, MatchValue
+
 from app.db import get_database
 from app.auth_helper import get_supabase_client
 from app.utils.semantic_chunker import chunk_text
+from app.config import QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION_NAME
 
 class EmbeddingService:
     _model = None
-    _chroma_client = None
-    _collection = None
+    _qdrant_client = None
+    COLLECTION_NAME = QDRANT_COLLECTION_NAME or "voxvault"
 
     @classmethod
     def get_model(cls):
@@ -22,25 +25,52 @@ class EmbeddingService:
         if cls._model is None:
             cache_dir = "D:/AI/Models"
             os.makedirs(cache_dir, exist_ok=True)
-            # Initialize SentenceTransformer referencing bge-small-en-v1.5 and caching in D:/AI/Models
             cls._model = SentenceTransformer("BAAI/bge-small-en-v1.5", cache_folder=cache_dir)
         return cls._model
 
     @classmethod
-    def get_chroma_collection(cls):
-        """Initializes and returns the ChromaDB persistent client and collection."""
-        if cls._chroma_client is None:
-            # Persistent Client inside storage/chromadb
-            persist_dir = "storage/chromadb"
-            os.makedirs(persist_dir, exist_ok=True)
-            cls._chroma_client = chromadb.PersistentClient(path=persist_dir)
-            cls._collection = cls._chroma_client.get_or_create_collection(name="media_embeddings")
-        return cls._collection
+    def get_qdrant_client(cls) -> QdrantClient:
+        """Initializes and returns the Qdrant Cloud or local Qdrant persistent client."""
+        if cls._qdrant_client is None:
+            url = os.getenv("QDRANT_URL") or QDRANT_URL
+            api_key = os.getenv("QDRANT_API_KEY") or QDRANT_API_KEY
+            if url:
+                cls._qdrant_client = QdrantClient(url=url, api_key=api_key if api_key else None)
+            else:
+                persist_dir = "storage/qdrant"
+                os.makedirs(persist_dir, exist_ok=True)
+                cls._qdrant_client = QdrantClient(path=persist_dir)
+        return cls._qdrant_client
+
+    @classmethod
+    def ensure_collection(cls, client: QdrantClient):
+        """Ensures the Qdrant collection exists with Cosine distance, 384 dimensions, and payload indexes."""
+        collection_name = os.getenv("QDRANT_COLLECTION_NAME") or cls.COLLECTION_NAME
+        if not client.collection_exists(collection_name):
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+            )
+        try:
+            from qdrant_client.models import PayloadSchemaType
+            client.create_payload_index(
+                collection_name=collection_name,
+                field_name="media_id",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            client.create_payload_index(
+                collection_name=collection_name,
+                field_name="owner_id",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+        except Exception:
+            pass
+
 
 async def generate_and_store_embeddings(media_id: str, owner_id: str) -> dict:
     """
     Retrieves the cleaned transcript from MongoDB, segments it semantically,
-    generates chunk-level embeddings, stores them in ChromaDB, and updates media status.
+    generates chunk-level embeddings, stores them in Qdrant Cloud, and updates media status.
     """
     start_time = time.time()
     db = get_database()
@@ -54,12 +84,13 @@ async def generate_and_store_embeddings(media_id: str, owner_id: str) -> dict:
     if not cleaned_transcript:
         raise ValueError("Cleaned transcript is empty. Please clean the transcript first.")
 
-    # 2. Get singleton components
+    # 2. Get singleton components & ensure collection
     model = EmbeddingService.get_model()
-    collection = EmbeddingService.get_chroma_collection()
+    qdrant = EmbeddingService.get_qdrant_client()
+    EmbeddingService.ensure_collection(qdrant)
+    collection_name = os.getenv("QDRANT_COLLECTION_NAME") or EmbeddingService.COLLECTION_NAME
 
     # 3. Perform semantic chunking
-    # Configurable parameters: threshold 0.6, max words 600, overlap words 80
     chunks = chunk_text(cleaned_transcript, model, similarity_threshold=0.6, max_words=600, overlap_words=80)
     
     if not chunks:
@@ -68,39 +99,51 @@ async def generate_and_store_embeddings(media_id: str, owner_id: str) -> dict:
     # 4. Generate final embeddings for each semantic chunk in batch
     chunk_embeddings = model.encode(chunks, convert_to_numpy=True)
 
-    # 5. Insert each chunk vector and metadata into ChromaDB
-    chunk_ids = []
-    documents = []
-    embeddings_list = []
-    metadatas = []
+    # 5. Delete existing vectors for this media_id to avoid duplicate inserts on retry
+    try:
+        qdrant.delete(
+            collection_name=collection_name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="media_id",
+                        match=MatchValue(value=media_id)
+                    )
+                ]
+            )
+        )
+    except Exception as e:
+        print(f"[Qdrant Note] Deletion check prior to upsert: {e}")
 
+    # 6. Build PointStruct list with required payload metadata
+    points = []
     for idx, chunk_text_content in enumerate(chunks):
-        chunk_id = f"chunk_{media_id}_{idx}_{str(uuid.uuid4())[:8]}"
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{media_id}_{idx}"))
         embedding_vector = chunk_embeddings[idx]
         
-        chunk_ids.append(chunk_id)
-        documents.append(chunk_text_content)
-        embeddings_list.append(embedding_vector.tolist())
-        metadatas.append({
-            "media_id": media_id,
-            "owner_id": owner_id,
-            "chunk_index": idx
-        })
+        points.append(
+            PointStruct(
+                id=point_id,
+                vector=embedding_vector.tolist(),
+                payload={
+                    "media_id": media_id,
+                    "owner_id": owner_id,
+                    "chunk_index": idx,
+                    "document": chunk_text_content
+                }
+            )
+        )
 
-    # Clear existing vectors for this media_id if they exist to avoid duplicate inserts on retry
-    collection.delete(where={"media_id": media_id})
-
-    # Add to persistent collection
-    collection.add(
-        ids=chunk_ids,
-        documents=documents,
-        embeddings=embeddings_list,
-        metadatas=metadatas
-    )
+    # Upsert points into Qdrant
+    if points:
+        qdrant.upsert(
+            collection_name=collection_name,
+            points=points
+        )
 
     processing_time = round(time.time() - start_time, 2)
 
-    # 6. Update media status in MongoDB to 'embedded'
+    # 7. Update media status in MongoDB to 'embedded'
     db.media.update_one(
         {"media_id": media_id},
         {"$set": {
@@ -108,7 +151,7 @@ async def generate_and_store_embeddings(media_id: str, owner_id: str) -> dict:
         }}
     )
 
-    # 7. Pipeline complete: Automatically delete local copy ONLY after pipeline succeeds & verified in Supabase Storage
+    # 8. Pipeline complete: Automatically delete local copy ONLY after pipeline succeeds & verified in Supabase Storage
     cleanup_local_file_after_pipeline(media_id)
 
     return {
@@ -138,7 +181,6 @@ def cleanup_local_file_after_pipeline(media_id: str):
 
     try:
         supabase = get_supabase_client()
-        # Verify object exists in Supabase Storage bucket 'media'
         folder = os.path.dirname(storage_path)
         res = supabase.storage.from_("media").list(path=folder if folder else None)
         target_name = os.path.basename(storage_path)
@@ -156,37 +198,44 @@ def cleanup_local_file_after_pipeline(media_id: str):
     except Exception as e:
         print(f"[Pipeline Cleanup Note] Storage verification check ({e}). Retaining local copy for safety.")
 
+
 def get_media_embeddings(media_id: str) -> list:
-    """Retrieves stored text chunks and vector previews from ChromaDB for display."""
-    collection = EmbeddingService.get_chroma_collection()
+    """Retrieves stored text chunks and vector previews from Qdrant Cloud for display."""
+    qdrant = EmbeddingService.get_qdrant_client()
+    EmbeddingService.ensure_collection(qdrant)
+    collection_name = os.getenv("QDRANT_COLLECTION_NAME") or EmbeddingService.COLLECTION_NAME
     
-    # Query ChromaDB matching media_id
-    results = collection.get(
-        where={"media_id": media_id},
-        include=["documents", "metadatas", "embeddings"]
-    )
-    
-    ids = results.get("ids", [])
-    documents = results.get("documents", [])
-    metadatas = results.get("metadatas", [])
-    embeddings = results.get("embeddings", [])
+    try:
+        records, _ = qdrant.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="media_id",
+                        match=MatchValue(value=media_id)
+                    )
+                ]
+            ),
+            with_payload=True,
+            with_vectors=True,
+            limit=500
+        )
+    except Exception as e:
+        print(f"[Qdrant Get Embeddings Error]: {e}")
+        records = []
     
     chunks = []
-    for i in range(len(ids)):
-        meta = metadatas[i] if i < len(metadatas) else {}
-        embedding = embeddings[i] if i < len(embeddings) else []
-        
-        # Take first 8 values as a visual preview representation of the vector profile
-        vector_preview = list(embedding)[:8] if len(embedding) > 0 else []
-        vector_preview_str = [round(val, 4) for val in vector_preview]
+    for record in records:
+        payload = record.payload or {}
+        vec = record.vector if isinstance(record.vector, list) else []
+        vector_preview = [round(val, 4) for val in vec[:8]]
         
         chunks.append({
-            "chunk_id": ids[i],
-            "text": documents[i] if i < len(documents) else "",
-            "chunk_index": meta.get("chunk_index", 0),
-            "vector_preview": vector_preview_str
+            "chunk_id": str(record.id),
+            "text": payload.get("document", ""),
+            "chunk_index": payload.get("chunk_index", 0),
+            "vector_preview": vector_preview
         })
         
-    # Sort chunk items by index sequence
     chunks.sort(key=lambda x: x["chunk_index"])
     return chunks

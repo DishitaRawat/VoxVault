@@ -107,7 +107,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
   const fetchConversations = async (id, token) => {
     setLoadingConversations(true);
     try {
-      const res = await fetch(`http://localhost:8000/media/${id}/conversations`, {
+      const res = await fetch(`${API_BASE_URL}/media/${id}/conversations`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -125,7 +125,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
   const fetchMessages = async (convId, token) => {
     setLoadingMessages(true);
     try {
-      const res = await fetch(`http://localhost:8000/conversations/${convId}/messages`, {
+      const res = await fetch(`${API_BASE_URL}/conversations/${convId}/messages`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -149,7 +149,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
 
   const fetchEmbeddings = async (id, token) => {
     try {
-      const res = await fetch(`http://localhost:8000/media/${id}/embeddings`, {
+      const res = await fetch(`${API_BASE_URL}/media/${id}/embeddings`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -164,7 +164,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
 
   const fetchTranscript = async (id, token) => {
     try {
-      const res = await fetch(`http://localhost:8000/media/${id}/transcript`, {
+      const res = await fetch(`${API_BASE_URL}/media/${id}/transcript`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -188,7 +188,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
       setError('');
       const token = localStorage.getItem('voxvault_token');
       try {
-        const res = await fetch(`http://localhost:8000/media/${mediaId}`, {
+        const res = await fetch(`${API_BASE_URL}/media/${mediaId}`, {
           method: 'GET',
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -224,7 +224,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
 
     const token = localStorage.getItem('voxvault_token');
     try {
-      const endpoint = `http://localhost:8000/media/${mediaId}/next-step`;
+      const endpoint = `${API_BASE_URL}/media/${mediaId}/next-step`;
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -237,7 +237,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
       onProceed(mediaId);
 
       // Reload updated media metadata status
-      const mediaRes = await fetch(`http://localhost:8000/media/${mediaId}`, {
+      const mediaRes = await fetch(`${API_BASE_URL}/media/${mediaId}`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -285,7 +285,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
   const handleCreateNewConversation = async () => {
     const token = localStorage.getItem('voxvault_token');
     try {
-      const res = await fetch(`http://localhost:8000/media/${mediaId}/conversations`, {
+      const res = await fetch(`${API_BASE_URL}/media/${mediaId}/conversations`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -326,7 +326,7 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
     setMessages((prev) => [...prev, tempUserMsg]);
 
     try {
-      const res = await fetch(`http://localhost:8000/media/${mediaId}/chat`, {
+      const res = await fetch(`${API_BASE_URL}/media/${mediaId}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

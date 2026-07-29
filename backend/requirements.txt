@@ -9,8 +9,10 @@ httpx
 python-multipart
 feedparser
 beautifulsoup4
-chromadb
 sentence-transformers
 google-genai
 ddgs
 yt-dlp
+qdrant-client
+certifi
+dnspython

@@ -6,6 +6,7 @@ import ProfileDetails from './components/ProfileDetails';
 import MediaDetail from './components/MediaDetail';
 import LandingPage from './components/LandingPage';
 import IngestionModal from './components/IngestionModal';
+import { API_BASE_URL } from './config';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState('landing');
@@ -32,7 +33,7 @@ function App() {
     }
     setLoadingMediaList(true);
     try {
-      const response = await fetch('http://localhost:8000/media', {
+      const response = await fetch(`${API_BASE_URL}/media`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -105,7 +106,7 @@ function App() {
 
     if (accessToken || authCode) {
       setIsVerifying(true);
-      fetch('http://localhost:8000/auth/oauth-callback', {
+      fetch(`${API_BASE_URL}/auth/oauth-callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

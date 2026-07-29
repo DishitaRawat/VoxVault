@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SUPABASE_URL } from '../config';
+import { SUPABASE_URL, API_BASE_URL } from '../config';
 
 export default function Register({ onNavigate, setIsLoggedIn }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -15,7 +15,7 @@ export default function Register({ onNavigate, setIsLoggedIn }) {
     setErrorMsg('');
     try {
       // 1. Call Signup
-      const registerRes = await fetch('http://localhost:8000/auth/signup', {
+      const registerRes = await fetch(`${API_BASE_URL}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, full_name: fullName }),
@@ -26,7 +26,7 @@ export default function Register({ onNavigate, setIsLoggedIn }) {
       }
 
       // 2. Auto-login immediately
-      const loginRes = await fetch('http://localhost:8000/auth/login', {
+      const loginRes = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

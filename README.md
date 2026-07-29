@@ -35,7 +35,7 @@ Modern podcasts and lecture recordings contain vast amounts of valuable informat
 1. **Multi-Source Ingestion**: Upload local files (`.mp3`, `.mp4`, `.wav`), discover podcast RSS feeds, or paste direct **YouTube video URLs**.
 2. **High-Speed Transcription**: Transcribes speech with sub-second latency using Groq Whisper (`whisper-large-v3-turbo`).
 3. **Automated Cleaning & Structuring**: Cleans raw transcripts into formatted paragraphs using Google Gemini API.
-4. **Vector Indexing & Semantic Search**: Embeds chunks using `SentenceTransformers` and indexes them in a persistent ChromaDB vector store.
+4. **Vector Indexing & Semantic Search**: Embeds chunks using `SentenceTransformers` and indexes them in **Qdrant Cloud (Managed Vector Database)**.
 5. **Grounded RAG Conversational AI**: Interactively ask questions about any media file and receive precise answers with timestamp citations.
 
 ---
@@ -62,7 +62,7 @@ flowchart TD
     subgraph Storage ["Databases & Cloud Storage"]
         Mongo["MongoDB Atlas (User Metadata & Transcripts)"]
         SupaStore["Supabase Storage ('media' bucket)"]
-        Chroma["ChromaDB Vector Store (Semantic Embeddings)"]
+        Qdrant["Qdrant Cloud (Managed Vector Database)"]
     end
 
     Client -->|HTTPS REST / JWT| API
@@ -72,7 +72,7 @@ flowchart TD
     YTDLP -->|Extract MP3| API
     API -->|Transcribe Audio| Whisper
     API -->|Clean Transcript & Chat| GeminiCleaner
-    Chunker -->|Persist Vectors| Chroma
+    Chunker -->|Persist Vectors| Qdrant
 ```
 
 ---
@@ -106,13 +106,13 @@ flowchart TD
 ### **AI / Machine Learning**
 - **Transcription**: Groq API (`whisper-large-v3-turbo`)
 - **LLM & Clean-up**: Google Gemini API (`google-genai` SDK)
-- **Vector Embeddings**: `sentence-transformers` (`all-MiniLM-L6-v2`)
+- **Vector Embeddings**: `sentence-transformers` (`all-MiniLM-L6-v2` / `BAAI/bge-small-en-v1.5`)
 - **Media Processing**: `yt-dlp`, FFmpeg
 
 ### **Databases & Cloud Services**
 - **Database**: MongoDB Atlas (`voxvault_db`)
 - **Cloud Storage**: Supabase Storage (`media` bucket)
-- **Vector Store**: ChromaDB (Persistent Disk Storage)
+- **Vector Store**: Qdrant Cloud (Managed Vector Database)
 
 ---
 

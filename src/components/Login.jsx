@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { SUPABASE_URL } from '../config';
+import { SUPABASE_URL, API_BASE_URL } from '../config';
 
 export default function Login({ onNavigate, setIsLoggedIn }) {
   const [email, setEmail] = useState('');
@@ -27,7 +27,7 @@ export default function Login({ onNavigate, setIsLoggedIn }) {
     setLoading(true);
     setErrorMsg('');
     try {
-      const response = await fetch('http://localhost:8000/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

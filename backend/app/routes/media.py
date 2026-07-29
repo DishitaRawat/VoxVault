@@ -220,7 +220,7 @@ async def generate_embeddings_for_media(
 ):
     """
     Triggers semantic chunking and embedding generation for the cleaned transcript.
-    Saves vectors to ChromaDB and updates media status to 'embedded'.
+    Saves vectors to Qdrant Cloud and updates media status to 'embedded'.
     """
     db = get_database()
     record = db.media.find_one({"media_id": media_id})
@@ -275,7 +275,7 @@ async def advance_media_pipeline(
     It inspects the current status and triggers the appropriate service step:
     - uploaded -> process (preprocess to WAV & transcribe via Whisper)
     - transcribed -> clean (format via Llama-3)
-    - cleaned -> embed (semantic chunking & persist in ChromaDB via BGE)
+    - cleaned -> embed (semantic chunking & persist in Qdrant Cloud via BGE)
     - embedded -> completed (finalization)
     - completed -> return success (no action needed)
     """

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function ProfileDetails({ onNavigate, setIsLoggedIn }) {
   const [fullName, setFullName] = useState(() => {
@@ -53,7 +54,7 @@ export default function ProfileDetails({ onNavigate, setIsLoggedIn }) {
           onNavigate('login');
           return;
         }
-        const res = await fetch('http://localhost:8000/user/profile', {
+        const res = await fetch(`${API_BASE_URL}/user/profile`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
@@ -75,7 +76,7 @@ export default function ProfileDetails({ onNavigate, setIsLoggedIn }) {
     setErrorMsg('');
     try {
       const token = localStorage.getItem('voxvault_token');
-      const res = await fetch('http://localhost:8000/user/profile/update', {
+      const res = await fetch(`${API_BASE_URL}/user/profile/update`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

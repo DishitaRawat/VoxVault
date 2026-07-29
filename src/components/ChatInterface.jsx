@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Dashboard from './Dashboard';
 import MediaDetail from './MediaDetail';
+import { API_BASE_URL } from '../config';
 
 export default function ChatInterface({ onNavigate, isLoggedIn }) {
   const [sidebarWidth, setSidebarWidth] = useState(260);
@@ -31,7 +32,7 @@ export default function ChatInterface({ onNavigate, isLoggedIn }) {
     setLoadingMediaList(true);
     const token = localStorage.getItem('voxvault_token');
     try {
-      const response = await fetch('http://localhost:8000/media', {
+      const response = await fetch(`${API_BASE_URL}/media`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`

@@ -4,7 +4,7 @@ from app.db import get_database
 from app.auth_helper import get_supabase_client
 from app.utils.audio import is_ffmpeg_installed, get_ffmpeg_path, convert_to_mp3
 
-TEMP_DIR = Path("storage/temp")
+TEMP_DIR = Path("app/uploads")
 
 # Ensure temporary directory exists
 if not TEMP_DIR.exists():
@@ -15,7 +15,7 @@ def preprocess_audio(media_id: str) -> str:
     Finds the media record and resolves the path of the stored audio file.
     If the file exists locally in app/uploads/, uses it directly.
     Otherwise, downloads the file from Supabase Storage via storage_path (owner_id/media_id.mp3)
-    into storage/temp/ for Groq Whisper transcription.
+    into app/uploads/ for Groq Whisper transcription.
     """
     db = get_database()
     media_record = db.media.find_one({"media_id": media_id})
