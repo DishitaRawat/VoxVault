@@ -169,6 +169,7 @@ function App() {
           }}
           isProcessingStarted={proceededMediaIds.includes(selectedMediaId)}
           onProceed={handleProceed}
+          onDeleteSuccess={(deletedId) => setMediaList(prev => prev.filter(m => m.media_id !== deletedId))}
         />
       </div>
     );

@@ -90,7 +90,7 @@ const PodcastSVGThumbnail = ({ title, imageUrl, size = '100%' }) => {
 };
 
 
-export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onProceed }) {
+export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onProceed, onDeleteSuccess }) {
   const [media, setMedia] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -102,7 +102,34 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
   const [sendingQuestion, setSendingQuestion] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const messagesEndRef = useRef(null);
+
+  const handleDeleteMedia = async () => {
+    if (!window.confirm("Are you sure you want to delete this media file? All associated transcripts, vector embeddings, and chat history will be permanently removed.")) {
+      return;
+    }
+    setIsDeleting(true);
+    const token = localStorage.getItem('voxvault_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/media/${mediaId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Failed to delete media');
+      }
+      if (onDeleteSuccess) {
+        onDeleteSuccess(mediaId);
+      }
+      onBack();
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchConversations = async (id, token) => {
     setLoadingConversations(true);
@@ -446,6 +473,18 @@ export default function MediaDetail({ mediaId, onBack, isProcessingStarted, onPr
               ID: {media.media_id.substring(0, 8)}...
             </span>
           )}
+          <button
+            onClick={handleDeleteMedia}
+            disabled={isDeleting}
+            className="flex items-center gap-1 py-1.5 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none disabled:opacity-50"
+            style={{color:'#ef4444',background:'rgba(239,68,68,0.08)'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(239,68,68,0.16)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(239,68,68,0.08)'}
+            title="Delete media and all associated resources"
+          >
+            <span className="material-symbols-outlined text-[16px]">delete</span>
+            <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
+          </button>
         </div>
       </div>
 

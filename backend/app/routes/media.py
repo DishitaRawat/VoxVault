@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form, status
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List
@@ -458,4 +460,64 @@ async def list_messages(
         return messages
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/media/{media_id}")
+async def delete_media(
+    media_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Deletes a media item and all associated resources across Supabase Storage,
+    Qdrant Cloud, MongoDB Atlas, and local server storage.
+    """
+    db = get_database()
+    record = db.media.find_one({"media_id": media_id})
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Media record not found.")
+        
+    if record.get("owner_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this file.")
+        
+    try:
+        # 1. Delete from Supabase Storage
+        storage_path = record.get("storage_path")
+        if storage_path:
+            try:
+                supabase = media_ingestion_service.get_supabase_client()
+                supabase.storage.from_("media").remove([storage_path])
+            except Exception as e:
+                print(f"[Delete Warning] Supabase storage remove: {e}")
+                
+        # 2. Delete vectors from Qdrant Cloud
+        try:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            qdrant = embedding_service.EmbeddingService.get_qdrant_client()
+            collection_name = os.getenv("QDRANT_COLLECTION_NAME") or embedding_service.EmbeddingService.COLLECTION_NAME
+            qdrant.delete(
+                collection_name=collection_name,
+                points_selector=Filter(
+                    must=[FieldCondition(key="media_id", match=MatchValue(value=media_id))]
+                )
+            )
+        except Exception as e:
+            print(f"[Delete Warning] Qdrant delete points: {e}")
+
+        # 3. Delete from MongoDB Atlas
+        db.media.delete_one({"media_id": media_id})
+        db.transcripts.delete_one({"media_id": media_id})
+        db.conversations.delete_many({"media_id": media_id})
+        db.chat_messages.delete_many({"media_id": media_id})
+
+        # 4. Delete local copy if present
+        stored_filename = record.get("stored_filename", f"{media_id}.mp3")
+        app_dir = Path(__file__).parent.parent
+        local_file = app_dir / "uploads" / stored_filename
+        if local_file.exists():
+            local_file.unlink()
+
+        return {"status": "success", "message": "Media and all associated resources deleted successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete media: {str(e)}")
 
