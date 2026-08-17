@@ -1,5 +1,6 @@
 import os
 import httpx
+from datetime import datetime
 from app.db import get_database
 
 def format_segments_with_timestamps(segments: list) -> str:
@@ -18,9 +19,8 @@ def format_segments_with_timestamps(segments: list) -> str:
 async def clean_transcript(media_id: str) -> str:
     """
     Retrieves the raw transcript for a given media ID from MongoDB,
-    calls Groq's Chat Completion API with llama-3.3-70b-versatile to format
-    and clean grammatical structure, saves the output in the clean_transcript field,
-    and updates the media status to 'cleaned'.
+    calls Groq's Chat Completion API to format and clean grammatical structure,
+    saves the output in the clean_transcript field, and updates the media status to 'cleaned'.
     """
     db = get_database()
     
@@ -60,46 +60,52 @@ async def clean_transcript(media_id: str) -> str:
         "6. Do not invent any facts or add commentary. Return ONLY the clean transcript text, with no preamble or outro."
     )
 
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text_to_clean}
-        ],
-        "temperature": 0.1
-    }
+    primary_model = os.getenv("GROQ_CLEANING_MODEL", "groq/compound")
+    # Candidate fallback models in case the configured model is deprecated or unavailable
+    candidate_models = [primary_model, "groq/compound", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"]
+    # De-duplicate while preserving order
+    models_to_try = []
+    for m in candidate_models:
+        if m not in models_to_try:
+            models_to_try.append(m)
 
-    # 3. Request LLM completion using asynchronous HTTPX client
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            
-            if response.status_code != 200:
-                error_detail = response.text or "Unknown Groq API Error."
-                raise RuntimeError(f"Groq API returned status {response.status_code}: {error_detail}")
-                
-            result = response.json()
-            cleaned_text = result["choices"][0]["message"]["content"].strip()
-    except httpx.RequestError as e:
-        raise RuntimeError(f"Network error while communicating with Groq API: {str(e)}")
-    except (KeyError, IndexError) as e:
-        raise RuntimeError(f"Failed to parse Groq API response structure: {str(e)}")
+    cleaned_text = None
+    used_model = None
+    last_error = None
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for model in models_to_try:
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_to_clean}
+                ],
+                "temperature": 0.1
+            }
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code == 200:
+                    result = response.json()
+                    cleaned_text = result["choices"][0]["message"]["content"].strip()
+                    used_model = model
+                    break
+                else:
+                    last_error = f"Status {response.status_code}: {response.text}"
+                    print(f"[Groq Model Warning] Model '{model}' failed ({last_error}). Trying fallback...")
+            except httpx.RequestError as e:
+                last_error = f"Network error: {str(e)}"
+                print(f"[Groq Request Error] Model '{model}' failed ({last_error}). Trying fallback...")
+
+    if not cleaned_text:
+        raise RuntimeError(f"Groq API call failed across models {models_to_try}. Last error: {last_error}")
 
     # 4. Save the cleaned transcript back to MongoDB
     db.transcripts.update_one(
         {"media_id": media_id},
         {"$set": {
             "clean_transcript": cleaned_text,
-            "cleaning_model": "llama-3.3-70b-versatile",
-            "cleaned_at": datetime.utcnow() if 'datetime' in globals() else None  # Handled safely below
-        }}
-    )
-    
-    # Update the timestamp manually to avoid globals dependency if datetime is not imported
-    from datetime import datetime
-    db.transcripts.update_one(
-        {"media_id": media_id},
-        {"$set": {
+            "cleaning_model": used_model,
             "cleaned_at": datetime.utcnow()
         }}
     )
@@ -111,3 +117,4 @@ async def clean_transcript(media_id: str) -> str:
     )
 
     return cleaned_text
+
